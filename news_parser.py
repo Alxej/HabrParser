@@ -1,43 +1,49 @@
-import newspaper
 from bs4 import BeautifulSoup
-import urllib.request
-import nltk
-import numpy as np
-from rss_parser import Parser
+from accessify import private
 import requests
+
+
 class HabrParser():
-    url_list = []
-    categories = []
-    categories_codenames = []
+    limit = 10
+    articles = []
 
-    def __init__(self, russian_categories: list = None):
-        self.categories = russian_categories
-        self.init_categories_real_name()
-
-    def init_categories_real_name(self):
-        codename_dictionary = {
-            "Политика": "politics", "Общество": "society",
-            "Экономика": "economy", "Армия": "defense_safety", 
-            "Безопасность": "defense_safety",
-            "В мире": "world", "Туризм": "tourism",
-            "Происшествия": "incidents", "Культура": "culture",
-            "Технологии": "computers", "Наука": "science",
-            "Религия": "religion"
-        }
-
-        if self.categories is None:
-            self.categories_codenames = codename_dictionary.values()
-        else:
-            self.categories_codenames = [codename_dictionary[category] for category in self.categories if category in codename_dictionary.keys()]
+    def __init__(self, articles_limit: int = 10):
+        self.limit = articles_limit
+        self.load_last_articles_dictionary()
     
+    @private
+    def load_last_articles_dictionary(self):
+        urls = self.get_last_article_urls(self.limit)
+        for url in urls:
+            try:
+                doc = self.download_document(url)
+                if doc['status'] == 'ok':
+                    self.articles.append(doc)
+            except Exception:
+                continue
 
-    def download_document(self,pid):
+    @private
+    def get_last_article_urls(self, n: int):
+        # получаем rss ленту новостей длины n
+        url = requests.get(f"https://habr.com/ru/rss/articles/?limit={n}.?with_hubs=true")
+        # если запрос возвращает ошибку, то выкидываем ошибку
+        if not url.ok:
+            raise Exception("rss is not loaded")
+        
+        # получаем ссылки на статьи
+        soup = BeautifulSoup(url.content, "xml")
+        items = soup.find_all('item')
+        links = [item.link.text for item in items]
+
+        return links
+
+    def download_document(self, url):
         # выгрузка документа
-        r = requests.get('https://habr.com/ru/articles/783641/')
+        r = requests.get(url)
         # парсинг документа
         soup = BeautifulSoup(r.text, 'html5lib') # instead of html.parser
         doc = {}
-        doc['id'] = pid
+        doc['link'] = url
         
         if not soup.find("h1", {"class": "tm-title tm-title_h1"}):
             # такое бывает, если статья не существовала или удалена
@@ -46,13 +52,23 @@ class HabrParser():
             
             doc['status'] = 'ok'
             doc['title'] = soup.find("h1", {"class": "tm-title tm-title_h1"}).text
-            print (doc['title'])
-            doc['text'] = soup.find("div", {"class": "post__text"}).text
-            doc['time'] = soup.find("span", {"class": "post__time"}).text
-            
-
-
-if __name__ == "__main__":
-    a = HabrParser()
-    for i in range(100000, 101000):
-        a.download_document(i)
+            ps = soup.find_all("p")
+            doc['text'] = ""
+            # собираем весь текст статьи
+            for p in ps:
+                text = p.text.replace('\xa0', " ").replace('\xad', " ")
+                doc['text'] += text
+            # собираем все подзаголовки
+            doc['subtitles'] = []
+            for i in range(2, 6):
+                hs = soup.find_all(f"h{i}")
+                for h in hs:
+                    text = h.text.replace('\xa0', "")
+                    doc['subtitles'].append(text)
+            # теги
+            tags = soup.find_all("a", {"class": "tm-tags-list__link"})
+            doc['tags'] = [tag.text for tag in tags]
+            # хабы
+            hubs = soup.find_all("a", {"class": "tm-hubs-list__link"})
+            doc['hubs'] = [hub.text for hub in hubs]
+        return doc

@@ -1,5 +1,7 @@
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
+from news_parser import HabrParser
+import io
+if __name__ == "__main__":
+    a = HabrParser()
+    print(a.articles)
+    with io.open("article.txt", encoding="utf-8", mode="w") as jok:
+        jok.write(str(a.articles[1]))
